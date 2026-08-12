@@ -1,7 +1,7 @@
 {
   "name": "q2-hmac-replay-protection",
   "version": "1.0.0",
-  "description": "HMAC-SHA256 request authentication and anti-replay attack security framework",
+  "description": "HMAC-SHA512 request authentication and anti-replay attack security framework",
   "main": "server/server.js",
   "type": "module",
   "scripts": {

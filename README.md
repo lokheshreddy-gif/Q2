@@ -1,6 +1,6 @@
 # Q2: HMAC Anti-Replay Protection Security Framework
 
-A production-ready Node.js Express security architecture providing cryptographic request authentication via HMAC-SHA256 signatures, request tampering defense, timestamp drift enforcement, and sliding-window nonce replay attack mitigation.
+A production-ready Node.js Express security architecture providing cryptographic request authentication via HMAC-SHA512 signatures, request tampering defense, timestamp drift enforcement, and sliding-window nonce replay attack mitigation.
 
 ---
 
@@ -14,7 +14,7 @@ q2/
 ├── tests/
 │   └── replay.spec.js   # Automated Playwright test suite for replay attacks
 ├── utils/
-│   └── hmac.js          # Cryptographic SHA256 HMAC signing & verification
+│   └── hmac.js          # Cryptographic SHA512 HMAC signing & verification
 ├── package.json         # Project manifests and scripts
 ├── .env.example         # Environment variable blueprint
 └── README.md            # System architecture and documentation
@@ -29,7 +29,7 @@ This system protects client-server communication against key web vulnerabilities
 1. **Replay Attacks**: An attacker intercepts a legitimate API payload and re-sends it to repeat an action (e.g., repeating a payment transaction).
    - *Mitigation*: Each request includes a unique cryptographic `x-nonce`. Processed nonces are stored in an in-memory `NonceStore` TTL cache and rejected if seen again.
 2. **Request Tampering**: An attacker modifies payload data or path parameters in transit.
-   - *Mitigation*: Requests are signed with an HMAC-SHA256 signature calculated over a canonical representation of the method, path, timestamp, nonce, and body.
+   - *Mitigation*: Requests are signed with an HMAC-SHA512 signature calculated over a canonical representation of the method, path, timestamp, nonce, and body.
 3. **Timestamp Skew / Stale Requests**: An attacker attempts to replay old requests after the server cache resets.
    - *Mitigation*: Timestamps older than `MAX_TIMESTAMP_DIFF_MS` (default 5 minutes) are rejected automatically.
 4. **Timing Attacks**: An attacker uses subtle time differences in string comparison to guess HMAC signatures.
@@ -58,7 +58,7 @@ METHOD:PATH:TIMESTAMP:NONCE:BODY_JSON
 
 **Signature Calculation**:
 ```js
-HMAC-SHA256(canonicalString, HMAC_SECRET)
+HMAC-SHA512(canonicalString, HMAC_SECRET)
 ```
 
 ---
@@ -118,12 +118,32 @@ npx playwright test
 
 ### Required Request Headers
 
-- `x-signature`: Hex string of calculated HMAC-SHA256 signature.
+- `X-Frugal-Mac` (or `x-signature`): Hex string of calculated HMAC-SHA512 signature.
 - `x-timestamp`: Millisecond Unix timestamp of request creation (`Date.now()`).
 - `x-nonce`: Cryptographically unique 16+ byte hex string.
+- `x-challenge-token`: (Optional for two-step flows) Server-issued challenge token.
 
-### Protected Endpoints
+### Protected Endpoints & Protocols
 
+- `POST /transactions` (or `/api/transactions`) - Initiates a two-step transaction. Responds with `transactionId`, `challengeToken`, `timestamp`, and `nonce`.
+- `PUT /transactions/:id` (or `/api/transactions/:id`) - Completes transaction using `X-Frugal-Mac` signature header. Replaying the request returns `409 Conflict`.
 - `POST /api/action` - Standard action handler.
 - `POST /api/transaction` - Protected financial transaction handler.
-# Q2
+
+---
+
+## 🔄 Two-Step Challenge-Response Flow
+
+```
+POST /transactions
+       ↓
+Transaction-ID, Challenge Token, Server Timestamp, Nonce
+       ↓
+PUT /transactions/:id (with X-Frugal-Mac header)
+       ↓
+200 OK
+       ↓
+Exact same request replayed
+       ↓
+409 Conflict
+```

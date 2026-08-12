@@ -35,6 +35,7 @@ test.describe('HMAC Anti-Replay Protection Test Suite', () => {
       data: body
     });
 
+    expect(signature).toHaveLength(128);
     expect(response.status()).toBe(200);
     const json = await response.json();
     expect(json.success).toBe(true);
@@ -235,6 +236,68 @@ test.describe('HMAC Anti-Replay Protection Test Suite', () => {
       data: body
     });
     expect(replayRes.status()).toBe(409);
+  });
+
+  test('8. Challenge-Response Two-Step Protocol - POST /transactions -> PUT /transactions/:id with X-Frugal-Mac -> 200 OK & 409 Conflict on Replay', async ({ request }) => {
+    // Step 1: Initiate Transaction
+    const createRes = await request.post('/transactions', {
+      data: { amount: 750, currency: 'USD' }
+    });
+
+    expect(createRes.status()).toBe(201);
+    const initData = await createRes.json();
+    expect(initData.transactionId).toMatch(/^tx_/);
+    expect(initData.challengeToken).toBeDefined();
+    expect(initData.timestamp).toBeDefined();
+    expect(initData.nonce).toBeDefined();
+
+    const { transactionId, challengeToken, timestamp, nonce } = initData;
+
+    // Step 2: Confirm Transaction via PUT with X-Frugal-Mac header
+    const path = `/transactions/${transactionId}`;
+    const method = 'PUT';
+    const body = { action: 'complete', amount: 750 };
+
+    const frugalMac = generateSignature({
+      method,
+      path,
+      timestamp,
+      nonce,
+      challengeToken,
+      body,
+      secret: SECRET
+    });
+
+    const confirmRes = await request.put(path, {
+      headers: {
+        'X-Frugal-Mac': frugalMac,
+        'x-timestamp': timestamp.toString(),
+        'x-nonce': nonce,
+        'x-challenge-token': challengeToken
+      },
+      data: body
+    });
+
+    expect(confirmRes.status()).toBe(200);
+    const confirmJson = await confirmRes.json();
+    expect(confirmJson.success).toBe(true);
+    expect(confirmJson.status).toBe('completed');
+    expect(confirmJson.transactionId).toBe(transactionId);
+
+    // Step 3: Send exact same request again (Replay attack simulation)
+    const replayRes = await request.put(path, {
+      headers: {
+        'X-Frugal-Mac': frugalMac,
+        'x-timestamp': timestamp.toString(),
+        'x-nonce': nonce,
+        'x-challenge-token': challengeToken
+      },
+      data: body
+    });
+
+    expect(replayRes.status()).toBe(409);
+    const replayJson = await replayRes.json();
+    expect(replayJson.error).toContain('Replay attack detected');
   });
 
 });

@@ -57,28 +57,32 @@ export const globalNonceStore = new NonceStore();
  *
  * @param {Object} [options]
  * @param {string} [options.secret] - Shared HMAC secret
+ * @param {string} [options.algorithm] - HMAC hashing algorithm (defaults to sha512)
  * @param {number} [options.maxTimestampDiffMs] - Maximum clock skew window in milliseconds
  * @param {NonceStore} [options.nonceStore] - Nonce store instance
  * @returns {Function} Express middleware handler
  */
 export function createSecurityMiddleware(options = {}) {
   const secret = options.secret || process.env.HMAC_SECRET || 'super_secret_key_12345';
+  const algorithm = options.algorithm || process.env.HMAC_ALGORITHM || 'sha512';
   const maxTimestampDiffMs = options.maxTimestampDiffMs ?? 
     parseInt(process.env.MAX_TIMESTAMP_DIFF_MS || '300000', 10);
   const nonceStore = options.nonceStore || globalNonceStore;
 
   return function hmacSecurityMiddleware(req, res, next) {
-    const signature = req.headers['x-signature'];
+    const signature = req.headers['x-frugal-mac'] || req.headers['x-signature'];
     const timestampHeader = req.headers['x-timestamp'];
     const nonce = req.headers['x-nonce'];
+    const challengeToken = req.headers['x-challenge-token'];
 
     // 1. Missing header validation
     if (!signature || !timestampHeader || !nonce) {
       return res.status(400).json({
         error: 'Missing required security headers',
-        requiredHeaders: ['x-signature', 'x-timestamp', 'x-nonce'],
+        requiredHeaders: ['x-frugal-mac (or x-signature)', 'x-timestamp', 'x-nonce'],
         receivedHeaders: {
-          'x-signature': !!signature,
+          'x-frugal-mac': !!req.headers['x-frugal-mac'],
+          'x-signature': !!req.headers['x-signature'],
           'x-timestamp': !!timestampHeader,
           'x-nonce': !!nonce
         }
@@ -120,9 +124,11 @@ export function createSecurityMiddleware(options = {}) {
       path: req.path,
       timestamp: timestampHeader,
       nonce,
+      challengeToken,
       body: req.body,
       signature,
-      secret
+      secret,
+      algorithm
     });
 
     if (!isValid) {
